@@ -2,12 +2,6 @@
 
 Guidance for Claude Code when working in this repository.
 
-## Status
-
-**The repo is currently empty** (only `.gitignore` is committed). Everything below is the
-*target* design, not a description of existing code. As files get built, update this doc so it
-describes reality — and delete this Status section once the skeleton exists.
-
 ## What this project is
 
 An agentic data-analysis assistant. The user asks a plain-English question about a CSV
@@ -84,15 +78,21 @@ A single `TypedDict` threaded through every node. Keep it flat and boring:
 | Field | Purpose |
 | --- | --- |
 | `question` | the user's plain-English ask |
+| `csv_path` | which file to load — `run_code` needs it to build the preamble |
 | `schema` | column names, dtypes, sample rows — the LLM's view of the data |
 | `code` | the pandas snippet from the most recent attempt |
-| `result` | stdout / repr of the successful run |
+| `result` | stdout of the successful run |
 | `error` | traceback from the failed run, or `None` |
-| `attempts` | integer, compared against the cap |
 | `answer` | final plain-English response |
+
+`attempts` is **not in the state yet.** It arrives with the retry cycle in build-order step 5. A
+field nothing reads misleads you about what the code actually does.
 
 Design note: `error` and `result` are separate fields rather than one `outcome` field, so the
 routing function can branch on a simple `is None` check instead of parsing a payload.
+
+`csv_path` is threaded through the state rather than kept as a module constant, so that `run_code`
+holds no module-level configuration of its own — consistent with the convention below.
 
 ### Nodes
 
@@ -117,54 +117,88 @@ loop that bills real money. Start at `MAX_ATTEMPTS = 3`.
 
 ### On the word "sandboxed"
 
-Be honest about this in code and in conversation. `exec()` in the same process is **not a
-sandbox** — generated code could read files, hit the network, or delete things. It is only
-acceptable here because the code comes from a model the author is prompting, on the author's own
-machine, against their own CSV.
+Be honest about this in code and in conversation. What `run_code` does is **not a sandbox** —
+generated code could read files, hit the network, or delete things. It is only acceptable here
+because the code comes from a model the author is prompting, on the author's own machine, against
+their own CSV.
 
 Ship it in stages, and say which stage you're in:
 
-1. **Now:** `exec()` with a restricted globals dict, captured stdout, and a wall-clock timeout.
-   Cheap, understandable, and enough to learn the agent loop.
-2. **Later, if this ever handles untrusted input:** a subprocess with resource limits, or a
-   container. This is a real rewrite of `run_code`, not a flag.
+1. **Now (built):** `subprocess.run([sys.executable, "-c", source], capture_output=True,
+   timeout=10)`. A separate process buys exactly two things — a wall-clock timeout that can
+   actually kill a hung snippet, and isolation of crashes from this program's interpreter. It buys
+   nothing against hostile code, which runs with full user permissions either way.
+2. **Later, if this ever handles untrusted input:** OS-level resource limits, a locked-down user,
+   or a container. This is a real rewrite of `run_code`, not a flag.
 
 Never describe stage 1 as secure.
+
+(An earlier draft of this doc specified in-process `exec()` with a restricted globals dict for
+stage 1. Subprocess was chosen instead: a restricted globals dict is trivially escapable and, more
+importantly, `exec()` has no way to stop an infinite loop.)
 
 ### Why Gemini Flash
 
 Cheap and fast, which matters a lot when the architecture retries on failure — a self-correcting
 loop on an expensive model gets costly fast. Writing a five-line pandas snippet against a known
-schema is well within a small model's ability. The model is configured in exactly one place so
-swapping it is a one-line change.
+schema is well within a small model's ability. The model is configured in exactly one place —
+`MODEL_NAME` in `llm.py` — so swapping it is a one-line change.
 
-## Planned layout
+Currently pinned to **`gemini-3.7-flash`**, not the floating `gemini-flash-latest` alias: an alias
+would change the model under you, so a prompt that worked yesterday could behave differently today
+with nothing in the code to explain it.
+
+Note that `gemini-2.5-flash` is retired — the API still lists it, but calling it on a new key
+returns 404. When a model ID starts failing, list the live ones:
+
+```python
+from google import genai
+genai.Client(api_key=...).models.list()
+```
+
+## Layout
 
 ```
-main.py            # entry point: CLI question in, answer out
+main.py            # entry point: schema summary, seeds state, invokes graph, prints result
 graph.py           # StateGraph definition — nodes, edges, compile
 state.py           # the TypedDict
+llm.py             # the single place the model is configured
+prompts.py         # prompt templates, kept out of node logic
 nodes/
   write_code.py
   run_code.py      # the execution tool
   explain.py
-prompts.py         # prompt templates, kept out of node logic
-data/              # sample CSVs to test against
+data/sales.csv     # sample CSV: region, quarter, sales, units — 12 rows
 ```
 
 Prompts live in their own module because they will be edited far more often than the graph
-wiring, and mixing the two makes both harder to read.
+wiring, and mixing the two makes both harder to read. `llm.py` exists because two nodes need a
+model, and building one in each would make a model swap a two-file edit whose halves can silently
+drift apart.
 
 ## Build order
 
 Each step should run end-to-end before starting the next one.
 
-1. Load a CSV, print the schema summary. No LLM, no graph.
-2. `run_code` alone: hand it a hardcoded pandas string, get output back. Prove the tool works.
-3. A one-node LangGraph that just echoes state. Learn the graph API on something trivial.
-4. `write_code` with the real LLM → `run_code`. Straight line, no retries. Accept that it breaks.
-5. Add the conditional edge and the retry cycle. This is the point where it becomes agentic.
-6. Add `give_up`, the attempt cap, and the `explain` node.
+1. ~~Load a CSV, print the schema summary. No LLM, no graph.~~ **Done.**
+2. ~~`run_code` alone: hand it a hardcoded pandas string, get output back.~~ **Done** — all four
+   paths exercised: success, `KeyError`, silent-but-clean, and the 10s timeout kill.
+3. ~~A one-node LangGraph that just echoes state.~~ **Done** with three stub nodes.
+4. ~~`write_code` with the real LLM → `run_code`.~~ **Done**, and `explain` came along with it
+   rather than waiting for step 6 —
+6. Add `give_up` and the attempt cap. Also add `attempts` to the state — it was deliberately left
+   out until something reads it. the slice was specified as producing a sentence, not a number.
+5. **Next:** add the conditional edge and the retry cycle. This is the point where it becomes
+   agentic.
+
+### What step 5 has to undo
+
+Two shortcuts were taken knowingly, and both belong to the retry step:
+
+- `graph.py` walks straight into `explain` even when `run_code` sets `error`. Nothing routes.
+- `explain` therefore guards with `if state.get("error"): return {}` so a failed run doesn't spend
+  an API call inventing a sentence about `None`. Once the conditional edge exists, failures never
+  reach that node and the guard should be deleted rather than left as dead weight.
 
 ## Setup
 
@@ -177,14 +211,21 @@ source .venv/bin/activate
 pip install langgraph langchain-google-genai pandas python-dotenv
 ```
 
+Installed versions as built: `langgraph` 1.2.11, `langchain-google-genai` 4.3.4, `pandas` 3.0.5,
+`python-dotenv` 1.2.2. Don't install `langchain-core` explicitly — it arrives as a dependency, and
+pinning it yourself risks a version that fights the one LangChain wants.
+
 The API key goes in `.env` as `GOOGLE_API_KEY`. `.env` is already gitignored — **never commit a
 key, and never print one in logs or error output.**
 
 Run with:
 
 ```bash
-python main.py "which region had the biggest drop in Q3?"
+.venv/bin/python main.py
 ```
+
+The question is a constant at the top of `main.py` for now. Taking it from `sys.argv` is a
+two-line change, deferred until the loop itself is trustworthy.
 
 ## Conventions
 
@@ -194,3 +235,6 @@ python main.py "which region had the biggest drop in Q3?"
 - The final answer always shows the code that produced it. See the "wrong-but-valid" risk above.
 - Prompt changes are behavior changes. Mention them explicitly rather than folding them into an
   unrelated edit.
+- Read model replies with `response.text`, not `response.content`. In langchain-core 1.x `.content`
+  is a list of typed blocks; `.text` flattens it to a plain string. Calling a string method on
+  `.content` raises `AttributeError: 'list' object has no attribute ...`.

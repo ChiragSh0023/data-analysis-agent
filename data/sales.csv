@@ -1,0 +1,13 @@
+region,quarter,sales,units
+North,Q1,12500,310
+South,Q1,9800,240
+East,Q1,15200,375
+West,Q1,11100,265
+North,Q2,13900,340
+South,Q2,10400,255
+East,Q2,16800,410
+West,Q2,10200,245
+North,Q3,9700,235
+South,Q3,11200,270
+East,Q3,9100,220
+West,Q3,10800,260

@@ -41,7 +41,7 @@ def build_schema_summary(csv_path: str) -> str:
 
     lines.append(f"\nFirst {SAMPLE_ROWS} rows:")
     lines.append(df.head(SAMPLE_ROWS).to_string(index=False))
-
+    # joins every string in the lines list into one big string, putting a newline (\n) between each element
     return "\n".join(lines)
 
 

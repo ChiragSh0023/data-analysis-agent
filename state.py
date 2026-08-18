@@ -14,6 +14,7 @@ TypedDict is a way to write down the shape of a dictionary — which keys it has
 
 from typing import Optional, TypedDict
 
+# total=False makes all keys optional
 
 class AnalysisState(TypedDict, total=False):
     question: str

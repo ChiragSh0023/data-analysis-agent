@@ -20,10 +20,7 @@ from state import AnalysisState
 
 TIMEOUT_SECONDS = 10
 
-# The model is told `df` already exists, so it never writes the load itself.
-# That removes a whole family of failures -- wrong filename, wrong read
-# function, forgotten import -- and keeps generated snippets down to a line or
-# two.
+# This part is prepended in the start of every code that runs
 PREAMBLE = """\
 import pandas as pd
 df = pd.read_csv({csv_path!r})
@@ -53,16 +50,17 @@ def execute(code: str, csv_path: str) -> Tuple[Optional[str], Optional[str]]:
         )
     except subprocess.TimeoutExpired:
         return None, (
-            f"The code did not finish within {TIMEOUT_SECONDS} seconds and was "
-            f"stopped. It may contain an infinite loop."
+            f"The code did not finish within {TIMEOUT_SECONDS} seconds and was stopped. It may contain an infinite loop."
         )
 
+    # Error -> return (None, error)
     if completed.returncode != 0:
         # stderr holds the real traceback. Handing it back verbatim is the
         # point -- a summarised error is useless to the model that has to fix it.
         return None, completed.stderr.strip()
 
     output = completed.stdout.strip()
+    # Output empty
     if not output:
         # Ran cleanly and printed nothing. Usually the snippet ended in a bare
         # expression instead of print(...), which is silent outside a notebook.
@@ -70,6 +68,7 @@ def execute(code: str, csv_path: str) -> Tuple[Optional[str], Optional[str]]:
         # and asking the explain step to interpret an empty string.
         return None, "The code ran without errors but printed nothing."
 
+    # Output non-empty
     return output, None
 
 

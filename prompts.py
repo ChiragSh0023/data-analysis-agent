@@ -24,6 +24,7 @@ Rules:
   nothing.
 - Keep it short. One or two lines is usually enough.
 - Only use columns that appear in the schema above.
+- if the question cannot be answered from the columns listed, reply with exactly CANNOT_ANSWER: <short reason>
 """
 
 EXPLAIN_PROMPT = """\

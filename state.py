@@ -15,7 +15,7 @@ TypedDict is a way to write down the shape of a dictionary — which keys it has
 from typing import Optional, TypedDict
 
 # total=False makes all keys optional
-
+# TypedDict helps to declare what value type keys will hold
 class AnalysisState(TypedDict, total=False):
     question: str
     csv_path: str
@@ -23,4 +23,4 @@ class AnalysisState(TypedDict, total=False):
     code: str
     result: Optional[str]
     error: Optional[str]
-    answer: str
+    unanswerable: Optional[str]

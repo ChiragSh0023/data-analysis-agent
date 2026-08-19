@@ -73,6 +73,8 @@ def execute(code: str, csv_path: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 def run_code(state: AnalysisState) -> dict:
+    if (state.get("unanswerable")):
+        return {}
     """Graph node: execute the current snippet, record result or error."""
     result, error = execute(state["code"], state["csv_path"])
     return {"result": result, "error": error}

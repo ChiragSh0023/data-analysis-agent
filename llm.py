@@ -21,6 +21,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 # worse than useless when you're trying to see whether your own code worked.
 # Narrowed to this one logger on purpose: a blanket warnings filter would also
 # hide the next warning, which might matter.
+# Since the annoying message is logged at WARNING level, setting the threshold to ERROR means warnings are now suppressed — they fall below the bar — while genuine ERROR and CRITICAL messages still get through
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
 # Pinned to a specific version rather than the floating "gemini-flash-latest"

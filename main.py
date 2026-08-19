@@ -14,7 +14,8 @@ CSV_PATH = "data/sales.csv"
 
 # Hardcoded on purpose for this first slice. Promoting it to a command-line
 # argument is a two-line change once the loop itself is trustworthy.
-QUESTION = "What is the average sales?"
+# QUESTION = "What is the average sales?"
+QUESTION = "What is the average discount?"
 
 SAMPLE_ROWS = 3
 
@@ -70,6 +71,10 @@ def main() -> None:
     print("\nCode the model wrote:")
     for line in final_state["code"].splitlines():
         print(f"  {line}")
+    
+    if final_state.get("unanswerable"):
+        print(f"The question is not answerable because {final_state.get("unanswerable")}")
+        return
 
     if final_state.get("error"):
         print("\nThe code failed:")

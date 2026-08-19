@@ -33,9 +33,18 @@ def write_code(state: AnalysisState) -> dict:
     """Graph node: question + schema in, pandas snippet out."""
     prompt = CODE_PROMPT.format(schema=state["schema"], question=state["question"])
 
-    response = get_llm().invoke(prompt)
+    llm = get_llm()
+    response = llm.invoke(prompt)
+
+    code = _strip_fences(response.text)
+    
+    if code.startswith("CANNOT_ANSWER"):
+        # split only on the first colon and leave the rest intact, in case the reason also has colon
+        parts = code.split(':', maxsplit=1)
+        reason = parts[1].strip() if len(parts) > 1 else "No reason given" # Ex: code came out as "CANNOT_ANSWER" only
+        return {"unanswerable": reason}
 
     # .text, not .content: this version of langchain-core returns content as a
     # list of typed blocks, and .text is the accessor that flattens it back to a
     # plain string.
-    return {"code": _strip_fences(response.text)}
+    return {"code": code}

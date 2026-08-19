@@ -24,3 +24,4 @@ class AnalysisState(TypedDict, total=False):
     result: Optional[str]
     error: Optional[str]
     unanswerable: Optional[str]
+    answer: Optional[str]

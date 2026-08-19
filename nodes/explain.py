@@ -21,7 +21,7 @@ def explain(state: AnalysisState) -> dict:
     This guard disappears once the conditional edge exists, because then failures
     never reach this node in the first place.
     """
-    if state.get("error"):
+    if state.get("unanswerable") or state.get("error"):
         return {}
 
     prompt = EXPLAIN_PROMPT.format(

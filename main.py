@@ -64,6 +64,10 @@ def main() -> None:
 
     print(f"\nQuestion:\n  {final_state['question']}")
 
+    if final_state.get("unanswerable"):
+        print(f"The question is not answerable because {final_state.get("unanswerable")}")
+        return
+
     # The generated code is printed on every run, success or failure. The risk
     # this architecture cannot eliminate is code that runs fine and returns a
     # confidently wrong number -- the right average of the wrong column. Seeing
@@ -72,10 +76,6 @@ def main() -> None:
     for line in final_state["code"].splitlines():
         print(f"  {line}")
     
-    if final_state.get("unanswerable"):
-        print(f"The question is not answerable because {final_state.get("unanswerable")}")
-        return
-
     if final_state.get("error"):
         print("\nThe code failed:")
         for line in final_state["error"].splitlines():

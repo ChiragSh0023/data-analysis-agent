@@ -25,3 +25,6 @@ class AnalysisState(TypedDict, total=False):
     error: Optional[str]
     unanswerable: Optional[str]
     answer: Optional[str]
+    # How many times write_code has run. The router compares this against
+    # MAX_ATTEMPTS in graph.py; without it a failing model loops forever.
+    attempts: int

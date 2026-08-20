@@ -1,13 +1,12 @@
 """Graph wiring: which node runs, and what runs after it.
 
-Right now this is a straight line -- write the code, run it, explain the result.
-The interesting version comes later, when a conditional edge sends failures back
-to `write_code` instead of forward. Keeping that edge out for now means the graph
-is boring enough to read in one sitting, which is the point of this stage.
+This is where the system stops being a pipeline and becomes agentic. The shape is
+no longer a line -- `run_code` can send control *backwards* to `write_code`, so a
+snippet that crashed gets rewritten with the traceback in hand and tried again.
 
-One consequence of the straight line worth knowing: if `run_code` reports an
-error, the graph still walks on into `explain`. Nothing here checks. `main.py`
-inspects the final state and prints the traceback instead of an answer.
+The two routing functions below are the whole of the control flow. "Where does
+this go after an error?" is answered by reading `route_after_run`, not by tracing
+`if` statements scattered through the nodes.
 """
 
 from langgraph.graph import END, START, StateGraph
@@ -16,6 +15,28 @@ from nodes.explain import explain
 from nodes.run_code import run_code
 from nodes.write_code import write_code
 from state import AnalysisState
+
+# Mandatory, not a tuning knob. A cycle plus a model that keeps failing is an
+# infinite loop that bills real money on every lap.
+MAX_ATTEMPTS = 3
+
+
+def route_after_write(state: AnalysisState) -> str:
+    """Did the model produce runnable code, or refuse the question?"""
+    if state.get("unanswerable"):
+        return "unanswerable"
+    return "ok"
+
+
+def route_after_run(state: AnalysisState) -> str:
+    """Did the snippet work, and if not, is another attempt allowed?"""
+    if not state.get("error"):
+        return "ok"
+
+    if state.get("attempts", 0) < MAX_ATTEMPTS:
+        return "retry"
+
+    return "exhausted"
 
 
 def build_graph():
@@ -33,8 +54,34 @@ def build_graph():
     builder.add_node("explain", explain)
 
     builder.add_edge(START, "write_code")
-    builder.add_edge("write_code", "run_code")
-    builder.add_edge("run_code", "explain")
+
+    # Two routers rather than one, because they answer questions asked at
+    # different moments. Folding them together would mean a single function
+    # reasoning about two unrelated points in the flow.
+    #
+    # The dict is not decoration: the router returns a *decision* ("retry"), and
+    # the dict says where that decision leads. Keeping them apart means you can
+    # rename a node without touching the routing logic, and the set of possible
+    # destinations is visible here rather than buried in return statements.
+    builder.add_conditional_edges(
+        "write_code",
+        route_after_write,
+        {
+            "ok": "run_code",
+            "unanswerable": END,
+        },
+    )
+
+    builder.add_conditional_edges(
+        "run_code",
+        route_after_run,
+        {
+            "ok": "explain",
+            "retry": "write_code",  # the cycle
+            "exhausted": END,       # becomes a give_up node in the next step
+        },
+    )
+
     builder.add_edge("explain", END)
 
     return builder.compile()

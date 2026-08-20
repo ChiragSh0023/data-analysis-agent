@@ -13,17 +13,12 @@ from state import AnalysisState
 def explain(state: AnalysisState) -> dict:
     """Graph node: question + code + result in, one sentence out.
 
-    Returns nothing at all when the previous node failed. The graph is a straight
-    line for now, so a failed run still arrives here; without this guard the node
-    would spend an API call asking the model to interpret `None` and get a
-    confident sentence about nothing back. `main.py` reports the error instead.
-
-    This guard disappears once the conditional edge exists, because then failures
-    never reach this node in the first place.
+    This node used to open with a guard clause, because the straight-line graph
+    walked into it even after a failed run. The router now sends failures
+    elsewhere, so the guard is gone rather than left behind as dead weight: a
+    check that can never fire still has to be read and understood by whoever
+    comes next.
     """
-    if state.get("unanswerable") or state.get("error"):
-        return {}
-
     prompt = EXPLAIN_PROMPT.format(
         question=state["question"],
         code=state["code"],

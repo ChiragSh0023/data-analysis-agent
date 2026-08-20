@@ -83,10 +83,9 @@ A single `TypedDict` threaded through every node. Keep it flat and boring:
 | `code` | the pandas snippet from the most recent attempt |
 | `result` | stdout of the successful run |
 | `error` | traceback from the failed run, or `None` |
+| `unanswerable` | why the question can't be answered from these columns, or absent |
 | `answer` | final plain-English response |
-
-`attempts` is **not in the state yet.** It arrives with the retry cycle in build-order step 5. A
-field nothing reads misleads you about what the code actually does.
+| `attempts` | how many times `write_code` has run, compared against the cap |
 
 Design note: `error` and `result` are separate fields rather than one `outcome` field, so the
 routing function can branch on a simple `is None` check instead of parsing a payload.
@@ -97,7 +96,9 @@ holds no module-level configuration of its own — consistent with the conventio
 ### Nodes
 
 - `write_code` — prompts Gemini Flash with the question + schema, and, on a retry, the previous
-  code and its traceback. Returns `code`.
+  code and its traceback. Returns `code` and an incremented `attempts` — or `unanswerable` if the
+  model replies `CANNOT_ANSWER: <reason>`, which is how it declines a question the columns can't
+  support instead of inventing a plausible wrong answer.
 - `run_code` — executes the snippet, captures stdout and exceptions. Returns `result` **or**
   `error`. This node never raises; a crash inside user code is data, not a failure.
 - `explain` — turns `result` into a sentence answering the original question.
@@ -106,14 +107,30 @@ holds no module-level configuration of its own — consistent with the conventio
 
 ### Edges
 
-`write_code → run_code → route`, where `route` is a conditional edge:
+Two conditional edges, not one, because they answer questions asked at different moments in the
+flow. Both routers live in `graph.py`.
+
+`route_after_write` — did the model produce code, or refuse the question?
+
+- `unanswerable` set → `END` (skip `run_code` entirely; there is no code to run)
+- otherwise → `run_code`
+
+`route_after_run` — did the snippet work, and if not, is another attempt allowed?
 
 - no `error` → `explain` → `END`
-- `error` and `attempts < MAX_ATTEMPTS` → back to `write_code`
-- `error` and cap reached → `give_up` → `END`
+- `error` and `attempts < MAX_ATTEMPTS` → back to `write_code` — **the cycle**
+- `error` and cap reached → `END` (becomes `give_up` in build-order step 6)
+
+Each router returns a *decision* string (`"retry"`, `"exhausted"`) which `add_conditional_edges`
+maps to a node through an explicit dict. Keeping the decision and the destination apart means a
+node can be renamed without touching routing logic, and every possible destination is visible in
+one place instead of buried in return statements.
 
 **The attempt cap is mandatory.** A cyclic graph with an LLM that keeps failing is an infinite
-loop that bills real money. Start at `MAX_ATTEMPTS = 3`.
+loop that bills real money. Currently `MAX_ATTEMPTS = 3` in `graph.py`.
+
+The cap shipped with the cycle rather than waiting for step 6 as originally planned. Landing a
+retry loop with no bound, even for one commit, is not a thing to do.
 
 ### On the word "sandboxed"
 
@@ -185,20 +202,24 @@ Each step should run end-to-end before starting the next one.
    paths exercised: success, `KeyError`, silent-but-clean, and the 10s timeout kill.
 3. ~~A one-node LangGraph that just echoes state.~~ **Done** with three stub nodes.
 4. ~~`write_code` with the real LLM → `run_code`.~~ **Done**, and `explain` came along with it
-   rather than waiting for step 6 —
-6. Add `give_up` and the attempt cap. Also add `attempts` to the state — it was deliberately left
-   out until something reads it. the slice was specified as producing a sentence, not a number.
-5. **Next:** add the conditional edge and the retry cycle. This is the point where it becomes
-   agentic.
+   rather than waiting — the slice was specified as producing a sentence, not a number.
+5. ~~Add the conditional edge and the retry cycle.~~ **Done** — two routers, the cycle, `attempts`,
+   and `MAX_ATTEMPTS`. The attempt cap shipped here rather than in step 6: landing a retry loop
+   with no bound, even for one commit, is not a thing to do. The guard clauses that had piled up in
+   `run_code` and `explain` were deleted, not left behind — a check that can never fire still costs
+   the next reader their time.
+6. **Next:** `give_up` as a real terminal node. The exhausted branch currently goes straight to
+   `END` and `main.py` reports the last error. That works, but it puts the reporting in the wrong
+   place and there is no single node you can point at for "what happens when we run out of tries?"
 
-### What step 5 has to undo
+### Verifying the cycle without spending quota
 
-Two shortcuts were taken knowingly, and both belong to the retry step:
-
-- `graph.py` walks straight into `explain` even when `run_code` sets `error`. Nothing routes.
-- `explain` therefore guards with `if state.get("error"): return {}` so a failed run doesn't spend
-  an API call inventing a sentence about `None`. Once the conditional edge exists, failures never
-  reach that node and the guard should be deleted rather than left as dead weight.
+The retry paths are awkward to test live: you need code that reliably fails, and the free tier is
+small (see Setup). Stub `nodes.write_code.get_llm` and `nodes.explain.get_llm` with a fake object
+whose `.invoke()` returns something carrying a `.text` attribute, and replace
+`nodes.run_code.execute` with a function that fails on demand. That exercises the real graph and
+the real routers with no network at all, and it turns "does the retry prompt actually contain the
+traceback?" into something you can assert rather than hope for.
 
 ## Setup
 
@@ -217,6 +238,21 @@ pinning it yourself risks a version that fights the one LangChain wants.
 
 The API key goes in `.env` as `GOOGLE_API_KEY`. `.env` is already gitignored — **never commit a
 key, and never print one in logs or error output.**
+
+### Quota
+
+The free tier allows **20 requests per day, per model** (`generate_content_free_tier_requests`).
+This bites harder than it looks, because the retry cycle multiplies calls: one question costs up to
+`MAX_ATTEMPTS` calls to `write_code` plus one to `explain` — four requests for a single failing
+question, so roughly five bad questions exhausts a day.
+
+Consequences worth planning around:
+
+- Test routing logic with stubs, not live calls (see the build-order note above).
+- The quota is per model, so switching `MODEL_NAME` to another Flash variant gets a fresh bucket.
+- A 429 with `RESOURCE_EXHAUSTED` means the daily cap, not a rate spike — waiting a few seconds
+  won't help, despite what the message's `retryDelay` suggests.
+- Transient `503 UNAVAILABLE` is a different thing entirely: that one really is temporary.
 
 Run with:
 

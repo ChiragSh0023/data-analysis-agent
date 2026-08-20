@@ -72,12 +72,15 @@ def main() -> None:
     # this architecture cannot eliminate is code that runs fine and returns a
     # confidently wrong number -- the right average of the wrong column. Seeing
     # what actually ran is the only defence at this stage.
-    print("\nCode the model wrote:")
+    attempts = final_state.get("attempts", 0)
+    retried = "" if attempts <= 1 else f" (after {attempts} attempts)"
+    print(f"\nCode the model wrote{retried}:")
     for line in final_state["code"].splitlines():
         print(f"  {line}")
     
     if final_state.get("error"):
-        print("\nThe code failed:")
+        attempts = final_state.get("attempts", 0)
+        print(f"\nGave up after {attempts} attempt(s). The last error was:")
         for line in final_state["error"].splitlines():
             print(f"  {line}")
         return

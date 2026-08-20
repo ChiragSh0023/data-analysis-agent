@@ -73,8 +73,10 @@ def execute(code: str, csv_path: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 def run_code(state: AnalysisState) -> dict:
-    if (state.get("unanswerable")):
-        return {}
-    """Graph node: execute the current snippet, record result or error."""
+    """Graph node: execute the current snippet, record result or error.
+
+    No guard against the unanswerable case any more -- the router now sends that
+    straight to the end, so this node only ever runs when there is code to run.
+    """
     result, error = execute(state["code"], state["csv_path"])
     return {"result": result, "error": error}

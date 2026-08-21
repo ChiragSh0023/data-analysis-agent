@@ -79,7 +79,6 @@ def main() -> None:
         print(f"  {line}")
     
     if final_state.get("error"):
-        attempts = final_state.get("attempts", 0)
         print(f"\nGave up after {attempts} attempt(s). The last error was:")
         for line in final_state["error"].splitlines():
             print(f"  {line}")

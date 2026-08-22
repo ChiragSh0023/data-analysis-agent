@@ -65,7 +65,7 @@ def main() -> None:
     print(f"\nQuestion:\n  {final_state['question']}")
 
     if final_state.get("unanswerable"):
-        print(f"The question is not answerable because {final_state.get("unanswerable")}")
+        print(f"\nThe question is not answerable because {final_state.get("unanswerable")}\n")
         return
 
     # The generated code is printed on every run, success or failure. The risk
@@ -73,18 +73,19 @@ def main() -> None:
     # confidently wrong number -- the right average of the wrong column. Seeing
     # what actually ran is the only defence at this stage.
     attempts = final_state.get("attempts", 0)
-    retried = "" if attempts <= 1 else f" (after {attempts} attempts)"
+    retried = "" if attempts <= 1 else f" (last of {attempts} attempts)"
     print(f"\nCode the model wrote{retried}:")
     for line in final_state["code"].splitlines():
         print(f"  {line}")
-    
-    if final_state.get("error"):
-        print(f"\nGave up after {attempts} attempt(s). The last error was:")
-        for line in final_state["error"].splitlines():
-            print(f"  {line}")
-        return
 
-    print(f"\nRaw result:\n  {final_state['result']}")
+    # Only the successful path has a result to show. On the give-up path there
+    # is nothing here, and `answer` carries the failure report instead.
+    if final_state.get("result"):
+        print(f"\nRaw result:\n  {final_state['result']}")
+
+    # One field to print either way: `explain` writes a real answer here, and
+    # `give_up` writes an honest failure. Deciding which happened is the graph's
+    # job, not this function's.
     print(f"\nAnswer:\n  {final_state['answer']}\n")
 
 

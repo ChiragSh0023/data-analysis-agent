@@ -102,8 +102,11 @@ holds no module-level configuration of its own — consistent with the conventio
 - `run_code` — executes the snippet, captures stdout and exceptions. Returns `result` **or**
   `error`. This node never raises; a crash inside user code is data, not a failure.
 - `explain` — turns `result` into a sentence answering the original question.
-- `give_up` — terminal node when the attempt cap is hit. Reports the last error honestly rather
-  than inventing an answer.
+- `give_up` — terminal node when the attempt cap is hit. Writes an honest failure report into
+  `answer`, so callers have one field to print either way, and leaves `error` set so they can still
+  tell the two apart without parsing text. Makes **no LLM call**: there is no prompt that turns
+  three failed attempts into a right answer, and asking for one buys a confident sentence built on
+  nothing.
 
 ### Edges
 
@@ -119,7 +122,7 @@ flow. Both routers live in `graph.py`.
 
 - no `error` → `explain` → `END`
 - `error` and `attempts < MAX_ATTEMPTS` → back to `write_code` — **the cycle**
-- `error` and cap reached → `END` (becomes `give_up` in build-order step 6)
+- `error` and cap reached → `give_up` → `END`
 
 Each router returns a *decision* string (`"retry"`, `"exhausted"`) which `add_conditional_edges`
 maps to a node through an explicit dict. Keeping the decision and the destination apart means a
@@ -185,6 +188,7 @@ nodes/
   write_code.py
   run_code.py      # the execution tool
   explain.py
+  give_up.py       # terminal node for the exhausted branch
 data/sales.csv     # sample CSV: region, quarter, sales, units — 12 rows
 ```
 
@@ -208,9 +212,20 @@ Each step should run end-to-end before starting the next one.
    with no bound, even for one commit, is not a thing to do. The guard clauses that had piled up in
    `run_code` and `explain` were deleted, not left behind — a check that can never fire still costs
    the next reader their time.
-6. **Next:** `give_up` as a real terminal node. The exhausted branch currently goes straight to
-   `END` and `main.py` reports the last error. That works, but it puts the reporting in the wrong
-   place and there is no single node you can point at for "what happens when we run out of tries?"
+6. ~~`give_up` as a real terminal node.~~ **Done.** Reporting moved out of `main.py` and into the
+   node, which made `main.py` shorter rather than longer: it now prints `answer` on every path that
+   produces one, and no longer branches on `error` at all.
+
+**The skeleton is complete.** Every node, edge, and outcome in this document exists and is
+exercised. Candidates for what comes next, none of them started and none urgent:
+
+- Take the question from `sys.argv` instead of a module constant. Two lines, deferred only because
+  the loop had to be trustworthy first — it now is.
+- A bigger, messier CSV. Every failure mode so far was provoked by hand on 12 clean rows; nulls,
+  mixed dtypes, and a date column that isn't a date are where wrong-but-valid code actually lives.
+- Structured output for `write_code`, replacing the `CANNOT_ANSWER:` string protocol and the fence
+  stripping with a typed reply the model cannot get wrong.
+- A checkpointer, so a run can be resumed or inspected after the fact.
 
 ### Verifying the cycle without spending quota
 

@@ -12,6 +12,7 @@ this go after an error?" is answered by reading `route_after_run`, not by tracin
 from langgraph.graph import END, START, StateGraph
 
 from nodes.explain import explain
+from nodes.give_up import give_up
 from nodes.run_code import run_code
 from nodes.write_code import write_code
 from state import AnalysisState
@@ -52,6 +53,7 @@ def build_graph():
     builder.add_node("write_code", write_code)
     builder.add_node("run_code", run_code)
     builder.add_node("explain", explain)
+    builder.add_node("give_up", give_up)
 
     builder.add_edge(START, "write_code")
 
@@ -78,10 +80,14 @@ def build_graph():
         {
             "ok": "explain",
             "retry": "write_code",  # the cycle
-            "exhausted": END,       # becomes a give_up node in the next step
+            "exhausted": "give_up",
         },
     )
 
+    # Both terminal nodes end the run. They are separate nodes rather than one
+    # node with an if, because "we answered" and "we ran out of tries" are
+    # different outcomes that happen to share an exit.
     builder.add_edge("explain", END)
+    builder.add_edge("give_up", END)
 
     return builder.compile()

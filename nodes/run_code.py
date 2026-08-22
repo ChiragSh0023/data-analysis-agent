@@ -26,6 +26,14 @@ import pandas as pd
 df = pd.read_csv({csv_path!r})
 """
 
+# To test the retry mechanism
+# PREAMBLE = """\
+# import pandas as pd
+# dff = pd.read_csv({csv_path!r})
+# """
+
+
+
 
 def execute(code: str, csv_path: str) -> Tuple[Optional[str], Optional[str]]:
     """Run `code` against the CSV and return (result, error) -- exactly one set.

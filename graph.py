@@ -21,14 +21,14 @@ from state import AnalysisState
 # infinite loop that bills real money on every lap.
 MAX_ATTEMPTS = 3
 
-
+# Return decision rather than node name -> to separate the decision from the destination
 def route_after_write(state: AnalysisState) -> str:
     """Did the model produce runnable code, or refuse the question?"""
     if state.get("unanswerable"):
         return "unanswerable"
     return "ok"
 
-
+# Return decision rather than node name -> to separate the decision from the destination
 def route_after_run(state: AnalysisState) -> str:
     """Did the snippet work, and if not, is another attempt allowed?"""
     if not state.get("error"):

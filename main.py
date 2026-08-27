@@ -5,17 +5,26 @@ Run it with:
     .venv/bin/python main.py
 """
 
+import sys
+
 import pandas as pd
 from dotenv import load_dotenv
 
 from graph import build_graph
 
-CSV_PATH = "data/sales.csv"
-
-# Hardcoded on purpose for this first slice. Promoting it to a command-line
-# argument is a two-line change once the loop itself is trustworthy.
-# QUESTION = "What is the average sales?"
-QUESTION = "What is the average discount?"
+# Both are defaults now, overridable from the command line:
+#
+#   python main.py
+#   python main.py "which region had the biggest drop in Q3?"
+#   python main.py "what is the average sales?" data/messy_sales.csv
+#
+# Read straight from sys.argv rather than through argparse. Two positional
+# arguments with no flags do not need a parser, and argparse would add a screen
+# of setup to save nothing. If this ever grows options (--model, --max-attempts),
+# switch then -- that is the point where hand-rolling starts costing more than it
+# saves.
+DEFAULT_CSV_PATH = "data/sales.csv"
+DEFAULT_QUESTION = "What is the average sales?"
 
 SAMPLE_ROWS = 3
 
@@ -52,12 +61,15 @@ def main() -> None:
     # printed.
     load_dotenv()
 
+    question = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_QUESTION
+    csv_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_CSV_PATH
+
     graph = build_graph()
 
     initial_state = {
-        "question": QUESTION,
-        "csv_path": CSV_PATH,
-        "schema": build_schema_summary(CSV_PATH),
+        "question": question,
+        "csv_path": csv_path,
+        "schema": build_schema_summary(csv_path),
     }
 
     final_state = graph.invoke(initial_state)

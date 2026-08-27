@@ -168,6 +168,29 @@ Currently pinned to **`gemini-3.7-flash`**, not the floating `gemini-flash-lates
 would change the model under you, so a prompt that worked yesterday could behave differently today
 with nothing in the code to explain it.
 
+Two failure modes seen on this API, worth telling apart before you start debugging your own code:
+
+- **Retired model.** `gemini-2.5-flash` still appears in `models.list()` but returns 404 on a new
+  key. A clean, immediate error.
+- **Very slow model.** `gemini-3.7-flash` has gone through spells of taking **2–4 minutes** for a
+  trivial prompt, with no error and nothing in the logs. It looks exactly like a hang and isn't —
+  the call does return. Measured: 127s and 262s for a prompt whose whole content was "reply with
+  exactly: ok".
+
+That last one is worth planning around, because the retry cycle multiplies it: a question that
+exhausts all three attempts plus `explain` is four sequential calls, so 8–17 minutes for a single
+failing question at those speeds. Two consequences:
+
+- Debug routing with stubs, never live calls. This is the same conclusion the quota limit forces,
+  for an unrelated reason.
+- If calls crawl, time one against another Flash variant before suspecting your own code. If the
+  other answers in seconds, the problem was never yours.
+
+If you do switch models temporarily, check whether the replacement honours `temperature`. Some
+Flash variants use **fixed sampling defaults** and ignore it silently with only a `UserWarning` —
+which would leave `get_llm` looking like it controls sampling while doing nothing. `3.7-flash`
+does honour it (verified: no warning at either 0.0 or 0.3).
+
 Note that `gemini-2.5-flash` is retired — the API still lists it, but calling it on a new key
 returns 404. When a model ID starts failing, list the live ones:
 
@@ -189,7 +212,9 @@ nodes/
   run_code.py      # the execution tool
   explain.py
   give_up.py       # terminal node for the exhausted branch
-data/sales.csv     # sample CSV: region, quarter, sales, units — 12 rows
+data/
+  sales.csv        # clean sample: region, quarter, sales, units — 12 rows
+  messy_sales.csv  # deliberately dirty sample — see below
 ```
 
 Prompts live in their own module because they will be edited far more often than the graph
@@ -272,11 +297,62 @@ Consequences worth planning around:
 Run with:
 
 ```bash
-.venv/bin/python main.py
+.venv/bin/python main.py                                            # defaults
+.venv/bin/python main.py "which region had the biggest drop in Q3?"
+.venv/bin/python main.py "what is the average sales?" data/messy_sales.csv
 ```
 
-The question is a constant at the top of `main.py` for now. Taking it from `sys.argv` is a
-two-line change, deferred until the loop itself is trustworthy.
+Two optional positional arguments, question then CSV path, read straight from `sys.argv`. No
+`argparse`: two positionals with no flags don't need a parser. Add one when the first `--flag`
+shows up, not before.
+
+## The messy CSV
+
+`data/messy_sales.csv` exists to break things on purpose. Every failure mode found before it was
+provoked by hand against 12 clean rows, which proves nothing about real data. Each column is dirty
+in a *different* way, so one file exercises several failure classes without being uniformly
+unusable:
+
+| Column | What's wrong | What it should provoke |
+| --- | --- | --- |
+| `units` | contains `N/A` and `unknown` | pandas reads the column as `str`; `.mean()` raises `TypeError` — a **loud** failure that should trigger the retry cycle |
+| `region` | 11 spellings of 4 regions (`north`, `NORTH`, `" North "`, `"East "`) | a naive `groupby` silently returns 11 groups — **wrong-but-valid**, the risk this architecture cannot eliminate |
+| `sales` | 2 empty cells | stays `float64`; `.mean()` silently skips the nulls, so the answer is right but the denominator isn't what you'd assume |
+| `order_date` | `2024-01-15`, `15/03/2024`, `"March 2, 2024"`, `not recorded`, empty | any date arithmetic needs `pd.to_datetime(..., errors="coerce")` and a decision about what to do with `NaT` |
+
+The `region` row was expected to be the dangerous one. A loud failure is cheap — the retry loop
+handles it, and you see the traceback either way. A silent wrong answer looks exactly like a right
+one, and the only defence is that `main.py` always prints the code.
+
+### What the messy CSV actually showed
+
+Two live questions, both answered correctly, and neither failure mode landed where predicted.
+
+**The retry cycle works against a real model.** "What is the average number of units sold?" took
+two attempts: the first hit `TypeError: Cannot perform reduction 'mean' with string dtype`, and
+given that traceback the model rewrote it as
+`pd.to_numeric(df['units'], errors='coerce').mean()`. This is the first time the cycle has been
+verified end-to-end without a stubbed failure.
+
+**The `region` trap did not catch it.** Asked for totals per region, the model wrote
+`df['region'].str.strip().str.title()` before grouping — unprompted, first attempt, four regions.
+Nothing in the prompt mentions normalisation; three sample rows showing `North` and `north` were
+apparently enough.
+
+**The real residual risk is narrower than "wrong answer", and neither retry nor a cap touches it.**
+Both answers silently dropped rows and read as though they hadn't:
+
+- the units average covers 17 of 20 rows (3 coerced to `NaN`)
+- the regional totals exclude 2 null-sales rows, one in East and one in West
+
+Every number is arithmetically right. What's missing is the population it was computed over, and
+the plain-English sentence is where that context disappears — `explain` is handed a bare number
+with no idea what was discarded upstream. Printing the code is the only reason this is visible at
+all.
+
+Worth fixing eventually, and it is a **prompt change, so treat it as a behaviour change**: have
+`write_code` print row counts alongside the answer, or have `EXPLAIN_PROMPT` require stating what
+was excluded. Not done yet.
 
 ## Conventions
 

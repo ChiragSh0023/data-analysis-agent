@@ -290,6 +290,12 @@ Consequences worth planning around:
 
 - Test routing logic with stubs, not live calls (see the build-order note above).
 - The quota is per model, so switching `MODEL_NAME` to another Flash variant gets a fresh bucket.
+- **A new API key in the same project does not help.** The bucket is
+  `GenerateRequestsPerDayPerProjectPerModel` — per *project* per model, so a reissued key inherits
+  the same exhausted counter. Verified twice over: with a fresh key in the old project,
+  `gemini-3.5-flash` answered while `gemini-3.6-flash` still 429'd in the same minute; a key from a
+  newly created project then worked immediately on `gemini-3.6-flash`. Fresh quota needs a new
+  project, a different model, or billing.
 - A 429 with `RESOURCE_EXHAUSTED` means the daily cap, not a rate spike — waiting a few seconds
   won't help, despite what the message's `retryDelay` suggests.
 - Transient `503 UNAVAILABLE` is a different thing entirely: that one really is temporary.
@@ -350,9 +356,43 @@ the plain-English sentence is where that context disappears — `explain` is han
 with no idea what was discarded upstream. Printing the code is the only reason this is visible at
 all.
 
-Worth fixing eventually, and it is a **prompt change, so treat it as a behaviour change**: have
-`write_code` print row counts alongside the answer, or have `EXPLAIN_PROMPT` require stating what
-was excluded. Not done yet.
+### Fixing it: why the counts come from pandas, not from `explain`
+
+The tempting fix is to tell `EXPLAIN_PROMPT` to state what was excluded. That is the wrong node.
+`explain` receives only the question, the code, and the printed output — it has no idea how many
+rows were dropped. Asking it to report a number it cannot see is an invitation to invent a
+plausible one, which trades a silent omission for a confident fabrication.
+
+So the counts are gathered where the arithmetic already happens. Two prompt edits, working as a
+pair:
+
+- `CODE_PROMPT` gains a rule: if the snippet leaves rows out, print how many it covered and how
+  many it dropped, computed in pandas, each clearly labelled. If nothing was dropped, print
+  nothing extra.
+- `EXPLAIN_PROMPT` gains the matching rule: report those counts if they appear in the output, and
+  say nothing at all about row counts if they don't — never estimate, never infer from the code.
+
+This is the project's central design decision applied one level down: pandas produces the facts,
+the model only words them. Note the failure mode this deliberately accepts — the model might not
+*notice* that its code drops rows, in which case nothing is printed and the answer is silently
+incomplete exactly as before. The fix narrows the gap; it does not close it.
+
+Both edits are **behaviour changes**, made together and on purpose.
+
+**Verified live, all three cases, first attempt each:**
+
+| Question | Disclosed | Independently checked |
+| --- | --- | --- |
+| average units (messy) | covered 17, left out 3 | 17 / 3 ✓ |
+| totals per region (messy) | covered 18, left out 2 | 18 / 2 ✓ |
+| average sales (clean) | *nothing extra* | nothing was dropped ✓ |
+
+The third row matters as much as the first two: a fix that makes the model bolt a caveat onto every
+answer would be its own kind of noise. It stayed quiet when there was nothing to declare.
+
+Side effect worth watching: generated snippets are now 4–6 lines instead of 1–2, which sits in
+tension with the "keep it short, one or two lines" rule in the same prompt. Nothing has broken, but
+if code quality degrades, those two rules are the first place to look.
 
 ## Conventions
 

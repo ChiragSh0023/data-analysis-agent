@@ -22,9 +22,14 @@ Rules:
 - Reply with Python code only. No explanation, no markdown fences, no ```python.
 - Use print() to output the answer. Code that computes without printing produces
   nothing.
-- Keep it short. One or two lines is usually enough.
+- Keep it short. The answer itself is usually one or two lines; the row counts
+  below are the only reason to write more.
 - Only use columns that appear in the schema above.
 - if the question cannot be answered from the columns listed, reply with exactly CANNOT_ANSWER: <short reason>
+- If your code leaves any rows out -- nulls skipped, values coerced to NaN,
+  filtering -- print how many rows the answer covers and how many were left out,
+  each on its own line and clearly labelled. Compute those counts in pandas; do
+  not estimate them. If nothing was left out, print nothing extra.
 """
 
 # Spliced into CODE_PROMPT only on a retry; on the first attempt that slot is an
@@ -43,7 +48,7 @@ The error it produced:
 """
 
 EXPLAIN_PROMPT = """\
-Answer the user's question in one plain sentence, using the computed result.
+Answer the user's question in plain language, using the computed result.
 
 Question: {question}
 
@@ -56,5 +61,9 @@ Its output:
 Rules:
 - Use the number exactly as given. Do not recompute it, round it, or second-guess
   it -- the code already did the arithmetic.
-- One sentence. No preamble, no restating the code.
+- If the output reports how many rows were covered or left out, say so plainly.
+  If it does not, say nothing about row counts at all -- never estimate, infer
+  from the code, or guess a number that is not in the output above.
+- One sentence, or two if there are excluded rows to mention. No preamble, no
+  restating the code.
 """

@@ -12,7 +12,7 @@ key itself.
 """
 
 import logging
-
+import warnings
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 # The google-genai library warns on every call that automatic function calling
@@ -23,6 +23,12 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 # hide the next warning, which might matter.
 # Since the annoying message is logged at WARNING level, setting the threshold to ERROR means warnings are now suppressed — they fall below the bar — while genuine ERROR and CRITICAL messages still get through
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
+# To filter out warning from gemini-3.6-flash for not accepting the temperature parameter 
+warnings.filterwarnings(
+    "ignore",
+    message=r".*fixed sampling defaults.*",
+    category=UserWarning
+)
 
 # Pinned to a specific version rather than the floating "gemini-flash-latest"
 # alias. An alias would silently change the model under you, so a prompt that
@@ -34,7 +40,8 @@ logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 # with:
 #   from google import genai
 #   genai.Client(api_key=...).models.list()
-MODEL_NAME = "gemini-3.7-flash"
+# MODEL_NAME = "gemini-3.7-flash"
+MODEL_NAME = "gemini-3.6-flash"
 
 
 def get_llm(temperature: float = 0.0) -> ChatGoogleGenerativeAI:

@@ -55,7 +55,7 @@ def write_code(state: AnalysisState) -> dict:
     # you are debugging your prompt, not a dice roll. A retry loosens that on
     # purpose: at temperature 0 the model tends to reproduce the code that just
     # failed, and a retry that repeats itself is only an invoice.
-    text, api_error = invoke_model(prompt, temperature=0.3 if is_retry else 0.0)
+    code, api_error = invoke_model(prompt, temperature=0.3 if is_retry else 0.0)
 
     if api_error:
         # The model was unreachable, so no attempt actually happened -- `attempts`
@@ -63,7 +63,7 @@ def write_code(state: AnalysisState) -> dict:
         # never reached the model would spend the retry budget on an outage.
         return {"api_error": api_error}
 
-    code = _strip_fences(text)
+    code = _strip_fences(code)
     
     if code.startswith("CANNOT_ANSWER"):
         # split only on the first colon and leave the rest intact, in case the reason also has colon

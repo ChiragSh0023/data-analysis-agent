@@ -56,6 +56,7 @@ def build_schema_summary(csv_path: str) -> str:
 
 
 def main() -> None:
+    print("------SCRIPT STARTING------")
     # Reads .env into the environment. The Gemini client picks GOOGLE_API_KEY up
     # from there by itself -- the key is never passed around in code, and never
     # printed.
@@ -99,7 +100,7 @@ def main() -> None:
     # `give_up` writes an honest failure. Deciding which happened is the graph's
     # job, not this function's.
     print(f"\nAnswer:\n  {final_state['answer']}\n")
-
+    print("------SCRIPT ENDED------")
 
 if __name__ == "__main__":
     main()

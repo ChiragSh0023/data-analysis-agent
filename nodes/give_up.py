@@ -21,6 +21,9 @@ def give_up(state: AnalysisState) -> dict:
     to print either way. `error` stays set alongside it, which is what lets a
     caller tell a real answer apart from this one without parsing the text.
     """
+    if state.get("api_error"):
+        return {"answer": _unreachable_report(state)}
+
     attempts = state.get("attempts", 0)
     error = state.get("error", "no error recorded")
 
@@ -31,3 +34,23 @@ def give_up(state: AnalysisState) -> dict:
     message += "\n".join(f"    {line}" for line in error.splitlines())
 
     return {"answer": message}
+
+
+def _unreachable_report(state: AnalysisState) -> str:
+    """Report an API failure, and salvage anything already computed.
+
+    Which of the two model calls failed changes what is worth saying. If
+    `write_code` could not be reached, nothing ran and there is nothing to
+    report. If `explain` could not be reached, the analysis actually succeeded
+    and only the wording is missing -- so the raw output goes out as-is rather
+    than being thrown away with the run.
+    """
+    message = f"I could not reach the model.\n\n  {state['api_error']}"
+
+    if state.get("result"):
+        message += (
+            "\n\n  The code did run, so here is its raw output, unworded:\n"
+        )
+        message += "\n".join(f"    {line}" for line in state["result"].splitlines())
+
+    return message

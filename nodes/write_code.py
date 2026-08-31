@@ -1,6 +1,6 @@
 """Asks the model for a pandas snippet that answers the question."""
 
-from llm import get_llm
+from llm import invoke_model
 from prompts import CODE_PROMPT, RETRY_SECTION
 from state import AnalysisState
 
@@ -55,10 +55,15 @@ def write_code(state: AnalysisState) -> dict:
     # you are debugging your prompt, not a dice roll. A retry loosens that on
     # purpose: at temperature 0 the model tends to reproduce the code that just
     # failed, and a retry that repeats itself is only an invoice.
-    llm = get_llm(temperature=0.3 if is_retry else 0.0)
-    response = llm.invoke(prompt)
+    text, api_error = invoke_model(prompt, temperature=0.3 if is_retry else 0.0)
 
-    code = _strip_fences(response.text)
+    if api_error:
+        # The model was unreachable, so no attempt actually happened -- `attempts`
+        # is deliberately not incremented. Charging an attempt for a call that
+        # never reached the model would spend the retry budget on an outage.
+        return {"api_error": api_error}
+
+    code = _strip_fences(text)
     
     if code.startswith("CANNOT_ANSWER"):
         # split only on the first colon and leave the rest intact, in case the reason also has colon

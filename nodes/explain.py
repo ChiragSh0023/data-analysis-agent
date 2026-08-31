@@ -5,7 +5,7 @@ told not to. The number it reports was computed by pandas; the model's only job
 is to say what that number means in the context of the question.
 """
 
-from llm import get_llm
+from llm import invoke_model
 from prompts import EXPLAIN_PROMPT
 from state import AnalysisState
 
@@ -25,6 +25,13 @@ def explain(state: AnalysisState) -> dict:
         result=state["result"],
     )
 
-    response = get_llm().invoke(prompt)
+    text, api_error = invoke_model(prompt)
 
-    return {"answer": response.text.strip()}
+    if api_error:
+        # Worth noticing what is *not* lost here: the code already ran and
+        # `result` still holds the number. Only the wording is missing, so
+        # `give_up` prints the raw output rather than pretending nothing was
+        # computed.
+        return {"api_error": api_error}
+
+    return {"answer": text.strip()}

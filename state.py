@@ -25,6 +25,12 @@ class AnalysisState(TypedDict, total=False):
     error: Optional[str]
     unanswerable: Optional[str]
     answer: Optional[str]
+    # The model itself could not be reached -- quota, outage, network. Kept apart
+    # from `error` on purpose: `error` means the generated code crashed, which is
+    # worth retrying, while this means the API is unavailable, which is not.
+    # Folding them together would spend all three attempts re-hitting a quota
+    # wall that is not going to move.
+    api_error: Optional[str]
     # How many times write_code has run. The router compares this against
     # MAX_ATTEMPTS in graph.py; without it a failing model loops forever.
     attempts: int

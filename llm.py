@@ -13,6 +13,8 @@ key itself.
 
 import logging
 import warnings
+from typing import Optional, Tuple
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 # The google-genai library warns on every call that automatic function calling
@@ -57,3 +59,38 @@ def get_llm(temperature: float = 0.0) -> ChatGoogleGenerativeAI:
     is what lets it try a different approach instead of the same one twice.
     """
     return ChatGoogleGenerativeAI(model=MODEL_NAME, temperature=temperature)
+
+# Longest API error worth putting in front of a person. Gemini's 429 payload is
+# ~1500 characters of JSON; the first couple of hundred carry the actual meaning.
+ERROR_CHARS = 240
+
+
+def invoke_model(prompt: str, temperature: float = 0.0) -> Tuple[Optional[str], Optional[str]]:
+    """Call the model and return (text, api_error) -- exactly one of them set.
+
+    This exists so that a model call can fail the way `run_code` fails: as data
+    the graph can route on, not as an exception that unwinds the whole run. Every
+    API failure hit while building this -- a 503 outage, two 429 quota walls --
+    killed an otherwise healthy run and printed a hundred lines of library
+    traceback. The node that runs *untrusted generated code* was more careful
+    about this than the nodes making ordinary network calls.
+
+    `except Exception` is deliberately broad, and safe here only because the try
+    block contains exactly one statement. Prompt formatting happens before it, so
+    a bug in a template still raises loudly instead of being swallowed and
+    reported as an API problem.
+
+    No retry loop of our own: the google-genai client already retries internally
+    (that is the tenacity frames in the traceback). Wrapping a second retry
+    around it would multiply a 503 into minutes of silent waiting, and would not
+    help a 429 at all, since a daily quota does not recover in seconds.
+    """
+    try:
+        response = get_llm(temperature=temperature).invoke(prompt)
+    except Exception as exc:
+        detail = str(exc).replace("\n", " ")
+        if len(detail) > ERROR_CHARS:
+            detail = detail[:ERROR_CHARS] + " [...]"
+        return None, f"{type(exc).__name__}: {detail}"
+
+    return response.text, None

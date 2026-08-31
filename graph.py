@@ -23,12 +23,29 @@ MAX_ATTEMPTS = 3
 
 # Return decision rather than node name -> to separate the decision from the destination
 def route_after_write(state: AnalysisState) -> str:
-    """Did the model produce runnable code, or refuse the question?"""
+    """Could we reach the model, and if so did it produce runnable code?"""
+    if state.get("api_error"):
+        return "api_error"
+
     if state.get("unanswerable"):
         return "unanswerable"
+
     return "ok"
 
 # Return decision rather than node name -> to separate the decision from the destination
+def route_after_explain(state: AnalysisState) -> str:
+    """Did the wording call succeed?
+
+    `explain` used to be terminal, wired straight to END. It needs a router now
+    only because it can fail for a reason that has nothing to do with the
+    analysis -- the number is computed and correct, and the model simply could
+    not be reached to put it into a sentence.
+    """
+    if state.get("api_error"):
+        return "api_error"
+    return "ok"
+
+
 def route_after_run(state: AnalysisState) -> str:
     """Did the snippet work, and if not, is another attempt allowed?"""
     if not state.get("error"):
@@ -71,6 +88,7 @@ def build_graph():
         {
             "ok": "run_code",
             "unanswerable": END,
+            "api_error": "give_up",
         },
     )
 
@@ -84,10 +102,19 @@ def build_graph():
         },
     )
 
-    # Both terminal nodes end the run. They are separate nodes rather than one
-    # node with an if, because "we answered" and "we ran out of tries" are
-    # different outcomes that happen to share an exit.
-    builder.add_edge("explain", END)
+    builder.add_conditional_edges(
+        "explain",
+        route_after_explain,
+        {
+            "ok": END,
+            "api_error": "give_up",
+        },
+    )
+
+    # give_up is the single exit for every way this can fail -- exhausted
+    # retries, or an unreachable model from either of the two nodes that call it.
+    # Keeping all the failure reporting in one node is why `main.py` can print
+    # `answer` without knowing which of them happened.
     builder.add_edge("give_up", END)
 
     return builder.compile()

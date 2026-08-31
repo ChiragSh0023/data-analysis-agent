@@ -84,11 +84,17 @@ A single `TypedDict` threaded through every node. Keep it flat and boring:
 | `result` | stdout of the successful run |
 | `error` | traceback from the failed run, or `None` |
 | `unanswerable` | why the question can't be answered from these columns, or absent |
+| `api_error` | the model could not be reached — quota, outage, network |
 | `answer` | final plain-English response |
 | `attempts` | how many times `write_code` has run, compared against the cap |
 
 Design note: `error` and `result` are separate fields rather than one `outcome` field, so the
 routing function can branch on a simple `is None` check instead of parsing a payload.
+
+`api_error` is separate from `error` for a reason that costs real money if you get it wrong.
+`error` means *the generated code crashed*, which is worth retrying. `api_error` means *the model
+was unreachable*, which is not — folding them together would spend all three attempts hammering a
+quota wall that will not move for another day.
 
 `csv_path` is threaded through the state rather than kept as a module constant, so that `run_code`
 holds no module-level configuration of its own — consistent with the convention below.
@@ -101,6 +107,13 @@ holds no module-level configuration of its own — consistent with the conventio
   support instead of inventing a plausible wrong answer.
 - `run_code` — executes the snippet, captures stdout and exceptions. Returns `result` **or**
   `error`. This node never raises; a crash inside user code is data, not a failure.
+
+Neither LLM node raises either. Both call `llm.invoke_model`, which returns `(text, api_error)` so
+an unreachable model becomes something the graph can route on. Before that existed, a transient 503
+or a 429 unwound the whole run with a hundred lines of library traceback — the node running
+*untrusted generated code* was being more careful than the ones making ordinary network calls.
+`invoke_model` adds no retry of its own: the google-genai client already retries internally, and a
+second layer would turn a 503 into minutes of silent waiting while doing nothing for a 429.
 - `explain` — turns `result` into a sentence answering the original question.
 - `give_up` — terminal node when the attempt cap is hit. Writes an honest failure report into
   `answer`, so callers have one field to print either way, and leaves `error` set so they can still
@@ -120,9 +133,23 @@ flow. Both routers live in `graph.py`.
 
 `route_after_run` — did the snippet work, and if not, is another attempt allowed?
 
-- no `error` → `explain` → `END`
+- no `error` → `explain`
 - `error` and `attempts < MAX_ATTEMPTS` → back to `write_code` — **the cycle**
 - `error` and cap reached → `give_up` → `END`
+
+`route_after_explain` — did the wording call reach the model?
+
+- no `api_error` → `END`
+- `api_error` → `give_up` → `END`
+
+`explain` was terminal until API failures were handled. It needs a router only because it can fail
+for a reason unrelated to the analysis: the number is computed and correct, and the model simply
+could not be reached to put it in a sentence. `give_up` prints the raw output in that case rather
+than discarding a run that had already done its work.
+
+Both `write_code` and `explain` can set `api_error`, and both route to `give_up`, which is the
+single exit for every failure. That is why `main.py` can print `answer` without knowing which of
+the four ways to fail actually happened.
 
 Each router returns a *decision* string (`"retry"`, `"exhausted"`) which `add_conditional_edges`
 maps to a node through an explicit dict. Keeping the decision and the destination apart means a
@@ -255,11 +282,21 @@ exercised. Candidates for what comes next, none of them started and none urgent:
 ### Verifying the cycle without spending quota
 
 The retry paths are awkward to test live: you need code that reliably fails, and the free tier is
-small (see Setup). Stub `nodes.write_code.get_llm` and `nodes.explain.get_llm` with a fake object
-whose `.invoke()` returns something carrying a `.text` attribute, and replace
-`nodes.run_code.execute` with a function that fails on demand. That exercises the real graph and
-the real routers with no network at all, and it turns "does the retry prompt actually contain the
-traceback?" into something you can assert rather than hope for.
+small (see Setup). Stub **`llm.get_llm`** with a fake object whose `.invoke()` returns something
+carrying a `.text` attribute, and replace `nodes.run_code.execute` with a function that fails on
+demand. That exercises the real graph and the real routers with no network at all, and it turns
+"does the retry prompt actually contain the traceback?" into something you can assert rather than
+hope for.
+
+**Patch `llm.get_llm`, not `nodes.write_code.get_llm`.** The nodes no longer import `get_llm` —
+they call `llm.invoke_model`, which looks `get_llm` up in its own module at call time. Patching the
+old names still "succeeds": it sets an unused attribute on the node module, the real client is
+built anyway, and your offline test quietly makes live calls against your quota. One patch point
+now covers both nodes.
+
+Since the same fake serves `write_code` and `explain`, have it branch on the prompt (`"Answer the
+user's question" in prompt`) if you care which one is being exercised. Otherwise `explain`
+cheerfully "answers" with a snippet of pandas and a passing test proves nothing.
 
 ## Setup
 

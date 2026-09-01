@@ -19,13 +19,15 @@ and do not import pandas -- both are done for you.
 Question: {question}
 {retry_section}
 Rules:
-- Reply with Python code only. No explanation, no markdown fences, no ```python.
+- Put the snippet in `code`. Bare Python only -- no markdown fences, no prose.
 - Use print() to output the answer. Code that computes without printing produces
-  nothing.
+  nothing -- a bare expression is silent outside a notebook.
 - Keep it short. The answer itself is usually one or two lines; the row counts
   below are the only reason to write more.
 - Only use columns that appear in the schema above.
-- if the question cannot be answered from the columns listed, reply with exactly CANNOT_ANSWER: <short reason>
+- If the question cannot be answered from the columns listed, set `can_answer` to
+  false and put a short explanation in `reason`, leaving `code` empty. Do not
+  invent a column to make the question answerable.
 - If your code leaves any rows out -- nulls skipped, values coerced to NaN,
   filtering -- print how many rows the answer covers and how many were left out,
   each on its own line and clearly labelled. Compute those counts in pandas; do

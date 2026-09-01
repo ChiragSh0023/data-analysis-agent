@@ -102,9 +102,20 @@ holds no module-level configuration of its own — consistent with the conventio
 ### Nodes
 
 - `write_code` — prompts Gemini Flash with the question + schema, and, on a retry, the previous
-  code and its traceback. Returns `code` and an incremented `attempts` — or `unanswerable` if the
-  model replies `CANNOT_ANSWER: <reason>`, which is how it declines a question the columns can't
-  support instead of inventing a plausible wrong answer.
+  code and its traceback. Returns `code` and an incremented `attempts` — or `unanswerable`, which
+  is how it declines a question the columns can't support instead of inventing a plausible wrong
+  answer.
+
+  The reply is **structured output**: `llm.invoke_structured` hands the model a `CodeReply` schema
+  (`can_answer`, `code`, `reason`) and gets an object back. That replaced two string hacks — a
+  `_strip_fences` helper that cut ```python wrappers off replies asked not to have them, and a
+  `code.startswith("CANNOT_ANSWER")` check that worked only while the model spelled the token
+  exactly right. Both were string comparisons standing in for a decision the model had already
+  made; `can_answer` is that decision as a boolean.
+
+  A schema guarantees the *shape*, not that the fields agree. The model can still return
+  `can_answer=True` with `code` empty, so the node checks for that and treats it as unanswerable —
+  a `None` reaching `run_code` would fail somewhere much more confusing.
 - `run_code` — executes the snippet, captures stdout and exceptions. Returns `result` **or**
   `error`. This node never raises; a crash inside user code is data, not a failure.
 
@@ -275,9 +286,12 @@ exercised. Candidates for what comes next, none of them started and none urgent:
   the loop had to be trustworthy first — it now is.
 - A bigger, messier CSV. Every failure mode so far was provoked by hand on 12 clean rows; nulls,
   mixed dtypes, and a date column that isn't a date are where wrong-but-valid code actually lives.
-- Structured output for `write_code`, replacing the `CANNOT_ANSWER:` string protocol and the fence
-  stripping with a typed reply the model cannot get wrong.
-- A checkpointer, so a run can be resumed or inspected after the fact.
+- ~~Structured output for `write_code`.~~ **Done** — `CodeReply` in `nodes/write_code.py`, called
+  through `llm.invoke_structured`. `_strip_fences` and the `CANNOT_ANSWER:` parsing are deleted.
+  Verify a model supports `with_structured_output` before building on it; checked on
+  `gemini-3.6-flash` first, for the same reason model IDs get checked.
+- A checkpointer, so a run can be resumed or inspected after the fact. **Not started** — the last
+  unbuilt item in this document.
 
 ### Verifying the cycle without spending quota
 

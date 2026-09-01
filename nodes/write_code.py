@@ -1,32 +1,41 @@
 """Asks the model for a pandas snippet that answers the question."""
 
-from llm import invoke_model
+from typing import Optional
+from pydantic import BaseModel, Field
+from llm import invoke_structured
 from prompts import CODE_PROMPT, RETRY_SECTION
 from state import AnalysisState
 
 
-def _strip_fences(text: str) -> str:
-    """Remove a surrounding ```python ... ``` block if the model added one.
+class CodeReply(BaseModel):
+    """The shape the model must fill in, instead of writing free text we parse.
 
-    The prompt asks for bare code, and models wrap it in markdown anyway -- often
-    enough that skipping this guarantees an eventual SyntaxError on line 1, from
-    code that was otherwise perfectly good.
+    This class replaced two pieces of guesswork. The first was `_strip_fences`,
+    which cut ```python wrappers off replies that were asked not to have them --
+    a fence left in place is a guaranteed SyntaxError on line 1. The second was
+    checking `code.startswith("CANNOT_ANSWER")` and splitting on a colon, which
+    worked only while the model spelled the token exactly right and never
+    prefixed it with anything.
 
-    The real fix is structured output, where the model returns a typed object and
-    the fence question never arises. That is a concept for a later step, so this
-    stays a string operation for now.
+    Both were string comparisons standing in for a decision the model had already
+    made. `can_answer` is that decision as a boolean: it cannot be misspelled,
+    wrapped in markdown, or phrased three different ways.
+
+    The field descriptions are not comments -- they are sent to the model as part
+    of the schema, so they are doing the same job as prompt text.
     """
-    text = text.strip()
 
-    if not text.startswith("```"):
-        return text
-
-    lines = text.splitlines()
-    lines = lines[1:]  # drop the opening ``` or ```python
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-
-    return "\n".join(lines).strip()
+    can_answer: bool = Field(
+        description="True if the question can be answered from the listed columns."
+    )
+    code: Optional[str] = Field(
+        default=None,
+        description="The pandas snippet, bare Python with no markdown fences. Null if can_answer is false.",
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="Short explanation of why the question cannot be answered. Null if can_answer is true.",
+    )
 
 
 def write_code(state: AnalysisState) -> dict:
@@ -55,7 +64,9 @@ def write_code(state: AnalysisState) -> dict:
     # you are debugging your prompt, not a dice roll. A retry loosens that on
     # purpose: at temperature 0 the model tends to reproduce the code that just
     # failed, and a retry that repeats itself is only an invoice.
-    code, api_error = invoke_model(prompt, temperature=0.3 if is_retry else 0.0)
+    reply, api_error = invoke_structured(
+        prompt, CodeReply, temperature=0.3 if is_retry else 0.0
+    )
 
     if api_error:
         # The model was unreachable, so no attempt actually happened -- `attempts`
@@ -63,15 +74,20 @@ def write_code(state: AnalysisState) -> dict:
         # never reached the model would spend the retry budget on an outage.
         return {"api_error": api_error}
 
-    code = _strip_fences(code)
-    
-    if code.startswith("CANNOT_ANSWER"):
-        # split only on the first colon and leave the rest intact, in case the reason also has colon
-        parts = code.split(':', maxsplit=1)
-        reason = parts[1].strip() if len(parts) > 1 else "No reason given" # Ex: code came out as "CANNOT_ANSWER" only
-        return {"unanswerable": reason, "attempts": attempts + 1}
+    if not reply.can_answer:
+        return {
+            "unanswerable": reply.reason or "No reason given",
+            "attempts": attempts + 1,
+        }
 
-    # .text, not .content: this version of langchain-core returns content as a
-    # list of typed blocks, and .text is the accessor that flattens it back to a
-    # plain string.
-    return {"code": code, "attempts": attempts + 1}
+    # A schema guarantees the *shape*, not that the fields agree with each other:
+    # the model can still answer can_answer=true and leave `code` empty. Treating
+    # that as unanswerable keeps a None out of `run_code`, which would otherwise
+    # fail in a much more confusing place.
+    if not reply.code:
+        return {
+            "unanswerable": "The model said the question was answerable but returned no code.",
+            "attempts": attempts + 1,
+        }
+
+    return {"code": reply.code, "attempts": attempts + 1}

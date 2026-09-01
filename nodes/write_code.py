@@ -74,6 +74,12 @@ def write_code(state: AnalysisState) -> dict:
         # never reached the model would spend the retry budget on an outage.
         return {"api_error": api_error}
 
+    if reply is None:
+        return {
+            "unanswerable": "The model's reply could not be parsed into the expected shape.",
+            "attempts": attempts + 1,
+        }
+
     if not reply.can_answer:
         return {
             "unanswerable": reply.reason or "No reason given",

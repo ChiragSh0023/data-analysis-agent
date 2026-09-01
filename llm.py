@@ -80,8 +80,8 @@ def invoke_structured(prompt: str, schema, temperature: float = 0.0):
     outright instead of degrading. Verified working on gemini-3.6-flash before
     this was built on.
     """
+    model = get_llm(temperature=temperature).with_structured_output(schema)
     try:
-        model = get_llm(temperature=temperature).with_structured_output(schema)
         reply = model.invoke(prompt)
     except Exception as exc:
         return None, _describe(exc)

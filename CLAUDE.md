@@ -241,6 +241,7 @@ genai.Client(api_key=...).models.list()
 
 ```
 main.py            # entry point: schema summary, seeds state, invokes graph, prints result
+                   #   and the step-by-step run history
 graph.py           # StateGraph definition — nodes, edges, compile
 state.py           # the TypedDict
 llm.py             # the single place the model is configured
@@ -290,8 +291,45 @@ exercised. Candidates for what comes next, none of them started and none urgent:
   through `llm.invoke_structured`. `_strip_fences` and the `CANNOT_ANSWER:` parsing are deleted.
   Verify a model supports `with_structured_output` before building on it; checked on
   `gemini-3.6-flash` first, for the same reason model IDs get checked.
-- A checkpointer, so a run can be resumed or inspected after the fact. **Not started** — the last
-  unbuilt item in this document.
+- ~~A checkpointer, so a run can be resumed or inspected after the fact.~~ **Done** — see below.
+
+**Every item in this document is now built.**
+
+## The checkpointer
+
+`main.py` compiles the graph with a `MemorySaver` and invokes it under a per-run `thread_id`.
+LangGraph then saves the state after every node, and `print_history` walks those snapshots to show
+which nodes ran and what each one left behind:
+
+```
+What happened, step by step:
+  1. write_code  wrote code (attempt 1)
+  2. run_code    failed -- TypeError: Cannot perform reduction 'mean' with string dtype
+  3. write_code  wrote code (attempt 2)
+  4. run_code    ran, printed 3 line(s)
+  5. explain     worded the answer
+```
+
+Why it earns its place: without it you see only the final state, so a run that retried twice looks
+exactly like one that succeeded first time. The cycle becomes visible as repetition — `write_code`
+appearing more than once *is* the retry.
+
+Two details worth knowing:
+
+- Snapshots come back **newest first**, and each records the node *about to* run rather than the one
+  that just did. The executed path is read from consecutive pairs: the earlier snapshot's `next`
+  ran, and the later snapshot holds the state it produced.
+- `metadata["writes"]` is empty on langgraph 1.2.11, so don't build on it. The `next` field and the
+  state values are what actually carry the information.
+
+**`MemorySaver` keeps checkpoints in this process only.** The history is available right after the
+run and gone when the program exits. That is enough to see what the retry did, and it costs no new
+dependency. Surviving a restart — resuming a crashed run, or inspecting yesterday's — needs a
+durable backend (`SqliteSaver`, from the separate `langgraph-checkpoint-sqlite` package). That is a
+one-package upgrade and a change to `main.py` only; `build_graph` already takes any checkpointer.
+
+`build_graph(checkpointer=None)` keeps it optional so the offline tests, which pass no thread id,
+are unaffected.
 
 ### Verifying the cycle without spending quota
 

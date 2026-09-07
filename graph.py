@@ -57,11 +57,20 @@ def route_after_run(state: AnalysisState) -> str:
     return "exhausted"
 
 
-def build_graph():
+def build_graph(checkpointer=None):
     """Assemble and compile the graph.
 
     A function rather than module-level code so that importing this module has
     no side effects -- nothing is built until someone asks for it.
+
+    `checkpointer` is optional on purpose. With one, LangGraph saves the state
+    after every node, which is what makes the run inspectable afterwards -- you
+    can see what attempt 1 wrote and what error it hit, not just the final
+    answer. Without one, the graph behaves exactly as before, so the offline
+    tests and any caller that doesn't care are unaffected.
+
+    A checkpointer also requires callers to pass a `thread_id`, which is why it
+    stays opt-in rather than being built in here.
     """
     builder = StateGraph(AnalysisState)
 
@@ -117,4 +126,4 @@ def build_graph():
     # `answer` without knowing which of them happened.
     builder.add_edge("give_up", END)
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

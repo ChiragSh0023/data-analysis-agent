@@ -281,12 +281,15 @@ Each step should run end-to-end before starting the next one.
    produces one, and no longer branches on `error` at all.
 
 **The skeleton is complete.** Every node, edge, and outcome in this document exists and is
-exercised. Candidates for what comes next, none of them started and none urgent:
+exercised. What followed it:
 
-- Take the question from `sys.argv` instead of a module constant. Two lines, deferred only because
-  the loop had to be trustworthy first — it now is.
-- A bigger, messier CSV. Every failure mode so far was provoked by hand on 12 clean rows; nulls,
-  mixed dtypes, and a date column that isn't a date are where wrong-but-valid code actually lives.
+- ~~Take the question from `sys.argv` instead of a module constant.~~ **Done** — two optional
+  positionals, question then CSV path. No `argparse`; add one when the first `--flag` appears.
+- ~~A bigger, messier CSV.~~ **Done** — `data/messy_sales.csv`, and it earned its place: see what
+  it showed below.
+- **Graceful API failures.** Not originally listed, added after a 503 and two 429s each killed a
+  healthy run with a hundred lines of traceback. `llm.invoke_model` / `invoke_structured` return
+  `(value, api_error)` so an unreachable model routes to `give_up` like any other failure.
 - ~~Structured output for `write_code`.~~ **Done** — `CodeReply` in `nodes/write_code.py`, called
   through `llm.invoke_structured`. `_strip_fences` and the `CANNOT_ANSWER:` parsing are deleted.
   Verify a model supports `with_structured_output` before building on it; checked on
@@ -429,10 +432,16 @@ given that traceback the model rewrote it as
 `pd.to_numeric(df['units'], errors='coerce').mean()`. This is the first time the cycle has been
 verified end-to-end without a stubbed failure.
 
-**The `region` trap did not catch it.** Asked for totals per region, the model wrote
-`df['region'].str.strip().str.title()` before grouping — unprompted, first attempt, four regions.
-Nothing in the prompt mentions normalisation; three sample rows showing `North` and `north` were
-apparently enough.
+**The `region` trap catches it sometimes — this is not deterministic.** Asked for totals per
+region, the model first wrote `df['region'].str.strip().str.title()` before grouping — unprompted,
+first attempt, four regions. On a later identical run through the web API it did *not*, and
+returned eleven groups: separate totals for `" North"`, `NORTH`, `north` and `"East "`.
+
+That second run is the wrong-but-valid failure this whole architecture cannot eliminate. Every
+number was arithmetically correct; the grouping was nonsense, and nothing in the output said so.
+Do not conclude from one good run that the model handles dirty categories — it handles them
+*often*, which is worse than never, because it trains you to stop checking. The only defence
+remains that the code is always printed.
 
 **The real residual risk is narrower than "wrong answer", and neither retry nor a cap touches it.**
 Both answers silently dropped rows and read as though they hadn't:
@@ -482,6 +491,72 @@ answer would be its own kind of noise. It stayed quiet when there was nothing to
 Side effect worth watching: generated snippets are now 4–6 lines instead of 1–2, which sits in
 tension with the "keep it short, one or two lines" rule in the same prompt. Nothing has broken, but
 if code quality degrades, those two rules are the first place to look.
+
+## The web layer
+
+`main.py` is no longer the only front end. `runner.run_analysis(question, csv_path)` runs the graph
+once and returns a flat, JSON-safe dict; `main.py` renders it to a terminal and `server.py` renders
+it to a browser. Neither presentation layer knows the other exists, and the analysis has no opinion
+about where it is going.
+
+```
+runner.py          # run_analysis + schema helpers. Prints nothing.
+server.py          # FastAPI: /api/upload, /api/ask, /api/schema
+static/            # index.html, style.css, app.js -- no build step, no npm
+sandbox/Dockerfile # the image generated code runs inside
+```
+
+Run it with `.venv/bin/uvicorn server:app --reload`.
+
+### Upload rules, and why each exists
+
+- **The client's filename never touches the filesystem.** A generated uuid is the real name; the
+  original is kept only as a display label. A browser is free to send `../../.env` as a filename.
+- **The size cap is counted while streaming**, not read from `Content-Length`, because a client
+  sets that header and can lie about it.
+- **The file is parsed with pandas before being accepted.** A file pandas cannot read is better
+  refused at upload with a clear message than three steps later as a traceback from inside a
+  container, where nothing points back at the upload.
+- **Uploads are swept at startup** past a retention age. Other people's data sitting on your disk
+  indefinitely is a liability with no upside.
+
+`csv_id` is matched against `^[0-9a-f]{32}$` before it is ever joined to a path. That regex is the
+only thing standing between a request and an arbitrary file.
+
+### Two executors, and how one is chosen
+
+`nodes/run_code.py` now has a container path and the original subprocess path. **Docker is the
+default.** The subprocess path requires `UNSAFE_LOCAL_EXECUTOR=yes-i-understand` — not `1`, not
+`true`, because it should read like a confession in whatever file someone puts it in.
+
+If Docker is missing and the opt-in is not set, `execute` returns an error rather than falling back.
+A quiet fallback is exactly how a development shortcut becomes a live incident.
+
+The check is a function, not a module constant, because `load_dotenv()` runs *after* this module is
+imported — a constant would be fixed before `.env` had been read, and setting the variable there
+would silently do nothing.
+
+`server.py` prints the executor mode at every boot. "Is this server containerising the code it
+runs?" should not require reading source at 3am.
+
+### What the container flags buy
+
+Build once: `docker build -t agent-sandbox:latest sandbox/`
+
+`--network=none` is the one that matters: even if generated code reached a secret, it has nowhere
+to send it. Everything else is defence in depth behind it — `--read-only` plus a `noexec` tmpfs so
+nothing can be staged or persisted, `--memory` and `--pids-limit` so a runaway allocation or fork
+bomb kills a container rather than the host, `--cap-drop=ALL` and `--user 65534` so root is
+unreachable, and only the one CSV mounted read-only so `.env` is not merely unreadable but absent.
+
+`execute()` keeps its `(result, error)` signature through all of this, which is the whole point of
+having had one: the graph, the routers and the retry cycle needed no edits, because a container
+killed for exceeding memory looks to them exactly like a `KeyError` did.
+
+**The adversarial checkpoint has not been run yet** — Docker is not installed on the development
+machine. Before this is exposed to anyone, confirm each of these fails safely: reading
+`/etc/passwd`, opening a socket, listing `/`, writing to the mounted CSV, allocating 10GB, and an
+infinite loop. Until that passes, the container path is code that has never executed.
 
 ## Conventions
 

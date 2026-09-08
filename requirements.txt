@@ -1,0 +1,10 @@
+# Pinned to what was actually built and tested against.
+langgraph==1.2.11
+langchain-google-genai==4.3.4
+pandas==3.0.5
+python-dotenv==1.2.2
+
+# Web layer
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32

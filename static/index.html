@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data analysis agent</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <canvas id="stars" aria-hidden="true"></canvas>
+
+  <header class="topbar">
+    <a class="mark" href="/">DA<span>_</span></a>
+    <nav class="topnav">
+      <span>/ upload</span>
+      <span>/ ask</span>
+      <span>/ result</span>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">[ pandas &nbsp;·&nbsp; langgraph &nbsp;·&nbsp; gemini flash ]</p>
+      <h1>
+        <span class="solid">ASK YOUR</span>
+        <span class="outline">SPREADSHEET</span>
+      </h1>
+      <p class="lede">
+        Upload a CSV and ask a question in plain English. The model writes pandas code,
+        the code runs, and you see every line of it — because a right-looking number from
+        the wrong column is the one mistake this cannot catch for you.
+      </p>
+      <div class="chips">
+        <span class="chip">Writes its own code</span>
+        <span class="chip chip-green">Retries on error</span>
+        <span class="chip chip-blue">Shows its working</span>
+        <span class="chip chip-red">Declines what it can't answer</span>
+      </div>
+    </section>
+
+    <section class="panel" id="step-upload">
+      <p class="step-label"><span class="num">01</span> Load a table</p>
+
+      <div class="drop" id="drop" tabindex="0" role="button"
+          aria-label="Choose a CSV file, or drop one here">
+        <input type="file" id="file" accept=".csv" hidden>
+        <p class="drop-main">Drop a <b>.csv</b> here</p>
+        <p class="drop-sub">or click to choose &nbsp;·&nbsp; 5 MB max</p>
+      </div>
+
+      <div class="loaded" id="loaded" hidden>
+        <p class="filename"><span class="dot"></span><span id="label"></span></p>
+        <ul class="columns" id="columns"></ul>
+      </div>
+    </section>
+
+    <section class="panel" id="step-ask">
+      <p class="step-label"><span class="num">02</span> Ask a question</p>
+      <div class="askrow">
+        <input type="text" id="question" autocomplete="off" spellcheck="false"
+              placeholder="which region had the biggest drop in Q3?">
+        <button id="ask" disabled>ASK</button>
+      </div>
+      <p class="hint" id="status">Load a CSV to begin.</p>
+      <ol class="progress" id="progress" aria-live="polite"></ol>
+    </section>
+
+    <section class="panel" id="step-result" hidden>
+      <p class="step-label"><span class="num">03</span> Result</p>
+      <div id="output"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span>not a sandbox in local mode — see CLAUDE.md</span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

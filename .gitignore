@@ -30,3 +30,6 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Uploaded CSVs (user data, never committed)
+uploads/
